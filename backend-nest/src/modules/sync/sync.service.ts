@@ -9,6 +9,7 @@ import {
   SyncErrorLogDocument,
 } from '../../schemas/sync-error-log.schema';
 import { DingTalkClient } from '../platform/clients/dingtalk.client';
+import { WeComClient } from '../platform/clients/wecom.client';
 
 /**
  * 核心同步服务
@@ -30,6 +31,7 @@ export class SyncService {
     @InjectModel(SyncErrorLog.name)
     private syncErrorLogModel: Model<SyncErrorLogDocument>,
     private readonly dingTalkClient: DingTalkClient,
+    private readonly weComClient: WeComClient,
   ) {}
 
   // ============================================================
@@ -136,6 +138,97 @@ export class SyncService {
       });
 
       // 不抛出异常 — Stream 连接不应因单个事件失败而中断
+    }
+  }
+
+  /**
+   * 处理企业微信 Callback 事件（与 handleDingTalkEvent 平行）
+   *
+   * WeComCallbackService 解密 XML 后构造 event 对象传入此方法，
+   * 结构与钉钉 Stream 事件一致：
+   *   event.headers.eventType   'create_user' | 'update_user' | 'delete_user'
+   *   event.headers.eventId     由 WeComCallbackService 生成的唯一 ID
+   *   event.headers.eventCorpId 企业微信 CorpId
+   *   event.data                解析后的用户数据 JSON
+   */
+  async handleWeComEvent(event: any): Promise<void> {
+    const headers = event.headers || {};
+    const eventType = headers.eventType as string;
+    const eventId = headers.eventId as string;
+    const eventCorpId = process.env.WECOM_CORP_ID || headers.eventCorpId || 'unknown';
+    let data: any = event.data;
+
+    if (typeof data === 'string') {
+      try {
+        data = JSON.parse(data);
+      } catch {
+        data = {};
+      }
+    }
+
+    if (!eventId) {
+      this.logger.warn('收到无 eventId 的企业微信事件，跳过');
+      return;
+    }
+
+    // 幂等检查
+    if (await this.isEventProcessed(eventId, 'wecom')) {
+      this.logger.log(`企业微信事件已处理，跳过 eventId=${eventId}`);
+      return;
+    }
+
+    const eventLog = await this.eventLogModel.create({
+      platformType: 'wecom',
+      eventSource: 'wecom_callback',
+      corpId: eventCorpId,
+      eventType,
+      eventId,
+      platformUserId: data.UserID || data.userId || undefined,
+      rawPayload: event,
+      handleStatus: 'pending',
+      receivedAt: new Date(),
+    });
+
+    try {
+      switch (eventType) {
+        case 'create_user':
+          await this.handleWeComUserAdd(data);
+          break;
+        case 'update_user':
+          await this.handleWeComUserModify(data);
+          break;
+        case 'delete_user':
+          await this.handleWeComUserLeave(data);
+          break;
+        default:
+          this.logger.log(`未处理的企业微信事件类型: ${eventType}`);
+      }
+
+      await this.eventLogModel.findByIdAndUpdate(eventLog._id, {
+        handleStatus: 'success',
+        handledAt: new Date(),
+      });
+    } catch (error) {
+      this.logger.error(
+        `企业微信事件处理失败 eventId=${eventId} eventType=${eventType}`,
+        error.stack,
+      );
+
+      await this.eventLogModel.findByIdAndUpdate(eventLog._id, {
+        handleStatus: 'failed',
+        errorMessage: error.message,
+        handledAt: new Date(),
+      });
+
+      await this.syncErrorLogModel.create({
+        eventLogId: eventLog._id,
+        platformType: 'wecom',
+        platformUserId: data.UserID || data.userId || undefined,
+        errorType: 'event_handle_failed',
+        errorMessage: error.message,
+        retryCount: 0,
+        status: 'pending',
+      });
     }
   }
 
@@ -256,14 +349,144 @@ export class SyncService {
 
   /**
    * 幂等检查：通过 eventId 判断事件是否已成功处理
+   * @param platformType 平台类型，默认 'dingtalk'
    */
-  private async isEventProcessed(eventId: string): Promise<boolean> {
+  private async isEventProcessed(
+    eventId: string,
+    platformType: string = 'dingtalk',
+  ): Promise<boolean> {
     const existing = await this.eventLogModel.findOne({
-      platformType: 'dingtalk',
+      platformType,
       eventId,
       handleStatus: 'success',
     });
     return !!existing;
+  }
+
+  // ============================================================
+  // 企业微信事件处理
+  // ============================================================
+
+  /**
+   * 企业微信员工入职 (create_user)
+   */
+  private async handleWeComUserAdd(data: any) {
+    const userId = data.UserID || data.userId;
+    if (!userId) {
+      this.logger.warn('create_user 事件缺少 UserID');
+      return;
+    }
+
+    let staffDTO;
+    try {
+      staffDTO = await this.weComClient.getUserDetail(userId);
+    } catch {
+      this.logger.warn(
+        `获取企业微信员工详情失败，使用事件数据降级处理 userId=${userId}`,
+      );
+      staffDTO = this.buildWeComFallbackDTO(data);
+    }
+
+    const staff = await this.upsertStaff(staffDTO);
+
+    if (!staff.unionId) {
+      await this.matchAndBindUnion(staff);
+    } else {
+      await this.refreshUnion(staff.unionId.toString());
+    }
+  }
+
+  /**
+   * 企业微信员工信息修改 (update_user)
+   */
+  private async handleWeComUserModify(data: any) {
+    const userId = data.UserID || data.userId;
+    if (!userId) {
+      this.logger.warn('update_user 事件缺少 UserID');
+      return;
+    }
+
+    let staffDTO;
+    try {
+      staffDTO = await this.weComClient.getUserDetail(userId);
+    } catch {
+      this.logger.warn(
+        `获取企业微信员工详情失败，使用事件数据降级处理 userId=${userId}`,
+      );
+      staffDTO = this.buildWeComFallbackDTO(data);
+    }
+
+    const staff = await this.upsertStaff(staffDTO);
+
+    if (staff.unionId) {
+      await this.refreshUnion(staff.unionId.toString());
+    } else {
+      await this.matchAndBindUnion(staff);
+    }
+  }
+
+  /**
+   * 企业微信员工离职/删除 (delete_user)
+   */
+  private async handleWeComUserLeave(data: any) {
+    const userId = data.UserID || data.userId;
+    if (!userId) {
+      this.logger.warn('delete_user 事件缺少 UserID');
+      return;
+    }
+
+    const corpId = process.env.WECOM_CORP_ID || '';
+
+    const staff = await this.staffModel.findOneAndUpdate(
+      {
+        platformType: 'wecom',
+        corpId,
+        platformUserId: userId,
+      },
+      {
+        $set: {
+          status: 'resigned',
+          isDeleted: true,
+          resignTime: new Date(),
+          lastEventAt: new Date(),
+          rawData: data,
+        },
+      },
+      { new: true },
+    );
+
+    if (!staff) {
+      this.logger.warn(
+        `未找到企业微信离职员工 staff, userId=${userId}, corpId=${corpId}`,
+      );
+      return;
+    }
+
+    if (staff.unionId) {
+      await this.refreshUnion(staff.unionId.toString());
+    }
+  }
+
+  /**
+   * 企业微信事件数据降级构建 DTO
+   */
+  private buildWeComFallbackDTO(data: any) {
+    return {
+      platformType: 'wecom' as const,
+      corpId: process.env.WECOM_CORP_ID || '',
+      platformUserId: data.UserID || data.userId || '',
+      name: data.Name || data.name,
+      mobile: data.Mobile || data.mobile,
+      email: data.Email || data.email,
+      jobNumber: data.Position || data.position,
+      departmentIds: data.Department
+        ? String(data.Department).split(',').map((s) => s.trim())
+        : [],
+      departmentNames: [],
+      position: data.Position || data.position,
+      status: 'active' as const,
+      rawData: data,
+    };
   }
 
   /**

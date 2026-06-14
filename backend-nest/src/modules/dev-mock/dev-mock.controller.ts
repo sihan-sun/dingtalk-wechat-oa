@@ -9,17 +9,22 @@ import { SyncService } from '../sync/sync.service';
 import { DevMockGuard } from './dev-mock.guard';
 
 /**
- * 请求体：模拟钉钉事件
+ * 请求体：模拟平台事件（支持钉钉和企业微信）
  *
- * 只需提供 eventType 和 userId，其余字段为可选（用于模拟不同员工数据）。
- * corpId 非必填，默认使用 "mock-corp"。
- * Controller 内部将包装为 DWClientDownStream 格式，
- * 调用 SyncService.handleDingTalkEvent() 走完整事件处理管道。
+ * 钉钉示例:
+ *   { "eventSource": "dingtalk_stream", "eventType": "user_add_org", "userId": "emp-001", "mobile": "13800001111" }
+ *
+ * 企业微信示例:
+ *   { "eventSource": "wecom_callback", "eventType": "create_user", "userId": "wc-001", "mobile": "13800002222" }
+ *
+ * eventSource 默认 "dingtalk_stream"。
  */
-export interface MockDingTalkEventDto {
-  /** 事件类型：user_add_org | user_modify_org | user_leave_org */
+export interface MockPlatformEventDto {
+  /** 事件来源：dingtalk_stream | wecom_callback，默认 dingtalk_stream */
+  eventSource?: string;
+  /** 事件类型 */
   eventType: string;
-  /** 企业 ID，默认 "mock-corp" */
+  /** 企业 ID */
   corpId?: string;
   /** 平台员工 ID（必填） */
   userId: string;
@@ -40,33 +45,47 @@ export interface MockDingTalkEventDto {
 /**
  * 开发环境模拟事件接口
  *
- * 用途：在无真实钉钉后台的情况下，通过 HTTP 请求模拟
- * user_add_org / user_modify_org / user_leave_org 事件，
- * 验证事件接收 → event_logs → staff → staff_unions 的完整链路。
+ * 支持两种平台：
+ *   - dingtalk_stream：模拟钉钉 Stream 事件，调用 handleDingTalkEvent
+ *   - wecom_callback：模拟企业微信 Callback 事件，调用 handleWeComEvent
  *
  * 路径：POST /api/dev/mock-dingtalk-event
- * 注意：此接口不走钉钉 Stream，不叫 callback，仅在 NODE_ENV !== 'production' 时启用。
+ * 注意：仅在 NODE_ENV !== 'production' 时启用
  */
 @Controller('api/dev')
 @UseGuards(DevMockGuard)
 export class DevMockController {
   private readonly logger = new Logger(DevMockController.name);
-
-  // 用于生成唯一 eventId 的计数器
   private eventCounter = 0;
 
   constructor(private readonly syncService: SyncService) {}
 
   @Post('mock-dingtalk-event')
-  async mockDingTalkEvent(@Body() dto: MockDingTalkEventDto) {
-    const corpId = dto.corpId || 'mock-corp';
+  async mockPlatformEvent(@Body() dto: MockPlatformEventDto) {
+    const eventSource = dto.eventSource || 'dingtalk_stream';
+    const corpId = dto.corpId || (eventSource === 'wecom_callback' ? 'mock-wecom-corp' : 'mock-dingtalk-corp');
     const now = Date.now();
 
-    // 生成唯一 eventId：mock-{时间戳}-{递增序号}
     this.eventCounter += 1;
-    const eventId = `mock-${now}-${this.eventCounter}`;
+    const prefix = eventSource === 'wecom_callback' ? 'wecom-mock' : 'mock';
+    const eventId = `${prefix}-${now}-${this.eventCounter}`;
 
-    // 构造 event.data（模拟钉钉 Stream 事件的业务数据）
+    if (eventSource === 'wecom_callback') {
+      return this.mockWeComEvent(dto, corpId, eventId, now);
+    }
+
+    return this.mockDingTalkEvent(dto, corpId, eventId, now);
+  }
+
+  /**
+   * 模拟钉钉 Stream 事件
+   */
+  private async mockDingTalkEvent(
+    dto: MockPlatformEventDto,
+    corpId: string,
+    eventId: string,
+    now: number,
+  ) {
     const eventData = {
       userId: dto.userId,
       name: dto.name || `模拟员工_${dto.userId}`,
@@ -77,8 +96,6 @@ export class DevMockController {
       title: dto.position,
     };
 
-    // 构造 DWClientDownStream 兼容结构
-    // 与真实钉钉 Stream 推送的格式一致
     const streamEvent = {
       headers: {
         eventType: dto.eventType,
@@ -90,7 +107,7 @@ export class DevMockController {
     };
 
     this.logger.log(
-      `模拟事件: type=${dto.eventType}, userId=${dto.userId}, eventId=${eventId}`,
+      `[钉钉模拟] type=${dto.eventType}, userId=${dto.userId}, eventId=${eventId}`,
     );
 
     await this.syncService.handleDingTalkEvent(streamEvent);
@@ -98,8 +115,56 @@ export class DevMockController {
     return {
       success: true,
       eventId,
+      eventSource: 'dingtalk_stream',
       eventType: dto.eventType,
-      message: `事件已处理，可在 event_logs / staffs / staff_unions 中查看结果`,
+      message: '事件已处理',
+    };
+  }
+
+  /**
+   * 模拟企业微信 Callback 事件
+   *
+   * 企业微信 XML 解密后的数据字段名与钉钉不同，
+   * 这里直接构造解密后的 JSON 格式传给 handleWeComEvent。
+   */
+  private async mockWeComEvent(
+    dto: MockPlatformEventDto,
+    corpId: string,
+    eventId: string,
+    now: number,
+  ) {
+    // 企业微信事件数据字段（模拟 XML 解密后的 JSON）
+    const eventData = {
+      UserID: dto.userId,
+      Name: dto.name || `模拟员工_${dto.userId}`,
+      Mobile: dto.mobile || '',
+      Email: dto.email || '',
+      Position: dto.position || '',
+      Department: dto.departmentIds?.join(',') || '',
+    };
+
+    const event = {
+      headers: {
+        eventType: dto.eventType,
+        eventId,
+        eventBornTime: now,
+        eventCorpId: corpId,
+      },
+      data: eventData,
+    };
+
+    this.logger.log(
+      `[企微模拟] type=${dto.eventType}, userId=${dto.userId}, eventId=${eventId}`,
+    );
+
+    await this.syncService.handleWeComEvent(event);
+
+    return {
+      success: true,
+      eventId,
+      eventSource: 'wecom_callback',
+      eventType: dto.eventType,
+      message: '事件已处理',
     };
   }
 }
