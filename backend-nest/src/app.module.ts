@@ -9,6 +9,7 @@ import { DingTalkStreamModule } from './modules/dingtalk-stream/dingtalk-stream.
 import { SyncModule } from './modules/sync/sync.module';
 import { DevMockModule } from './modules/dev-mock/dev-mock.module';
 import { WeComCallbackModule } from './modules/wecom-callback/wecom-callback.module';
+import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { WeComCallbackModule } from './modules/wecom-callback/wecom-callback.mod
     DingTalkStreamModule, // OnModuleInit 时自动连接钉钉 Stream
     DevMockModule, // 开发环境模拟事件接口（仅 NODE_ENV !== 'production'）
     WeComCallbackModule, // 企业微信 HTTP Callback 事件接收
+    AdminModule, // 后台管理 API：staff-unions / staffs / event-logs / sync-errors
   ],
 })
 export class AppModule {}
