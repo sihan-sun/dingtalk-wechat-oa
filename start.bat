@@ -1,62 +1,58 @@
 @echo off
-chcp 65001 >nul
-title 员工同步系统 - 启动中...
+chcp 65001 >nul 2>&1
+title Staff Sync - Starting...
 
 echo.
-echo  ╔══════════════════════════════════╗
-echo  ║   钉钉 / 企业微信 员工同步系统   ║
-echo  ╚══════════════════════════════════╝
+echo ========================================
+echo   DingTalk / WeCom Staff Sync System
+echo ========================================
 echo.
 
-:: ── 1. MongoDB ──────────────────────────────────
-echo [1/3] 启动 MongoDB...
-cd /d "%~dp0"
+:: Get script directory (handles Chinese paths)
+set "ROOT=%~dp0"
+
+:: --- 1. MongoDB ---
+echo [1/3] Starting MongoDB...
+cd /d "%ROOT%"
 docker compose up -d >nul 2>&1
 if %errorlevel% neq 0 (
-    echo   [警告] Docker 未运行，请先启动 Docker Desktop
-    echo   跳过 MongoDB...
+    echo   [WARN] Docker not running, please start Docker Desktop first
 ) else (
-    echo   [OK] MongoDB 已启动
+    echo   [OK] MongoDB started
 )
 
-:: ── 2. 后端 ─────────────────────────────────────
-echo [2/3] 启动后端服务 (端口 3001)...
-cd /d "%~dp0backend-nest"
+:: --- 2. Backend ---
+echo [2/3] Starting backend (port 3001)...
+cd /d "%ROOT%backend-nest"
 if not exist "node_modules" (
-    echo   首次运行，安装后端依赖...
-    call npm install >nul 2>&1
+    echo   First run: installing backend dependencies...
+    call npm install
 )
-start "StaffSync-Backend" cmd /c "node dist\main.js 2>&1"
-echo   [OK] 后端已启动
+start "StaffSync-Backend" cmd /c "node dist\main.js"
+echo   [OK] Backend started
 
-:: ── 3. 前端 ─────────────────────────────────────
-echo [3/3] 启动前端界面 (端口 5173)...
-cd /d "%~dp0frontend-vue"
+:: --- 3. Frontend ---
+echo [3/3] Starting frontend (port 5173)...
+cd /d "%ROOT%frontend-vue"
 if not exist "node_modules" (
-    echo   首次运行，安装前端依赖...
-    call npm install >nul 2>&1
+    echo   First run: installing frontend dependencies...
+    call npm install
 )
-start "StaffSync-Frontend" cmd /c "npx vite --host 2>&1"
-echo   [OK] 前端已启动
+start "StaffSync-Frontend" cmd /c "npx vite --host"
+echo   [OK] Frontend started
 
-:: ── 等待服务就绪 ───────────────────────────────
+:: --- Wait and open browser ---
 echo.
-echo 等待服务就绪...
+echo Waiting for services...
 timeout /t 6 /nobreak >nul
-
-:: ── 打开浏览器 ─────────────────────────────────
-echo 正在打开浏览器...
 start http://localhost:5173
 
 echo.
-echo  ╔══════════════════════════════════╗
-echo  ║  系统已启动，浏览器已打开        ║
-echo  ║                                  ║
-echo  ║  前端: http://localhost:5173     ║
-echo  ║  后端: http://localhost:3001     ║
-echo  ║                                  ║
-echo  ║  关闭此窗口不会停止服务          ║
-echo  ╚══════════════════════════════════╝
+echo ========================================
+echo   System is running!
+echo   Frontend: http://localhost:5173
+echo   Backend:  http://localhost:3001
+echo ========================================
 echo.
 
 pause
