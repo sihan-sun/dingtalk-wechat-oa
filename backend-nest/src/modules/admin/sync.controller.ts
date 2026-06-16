@@ -48,7 +48,7 @@ export class SyncController {
 
       return { success: true, staffId: staff._id, message: '单员工同步完成' };
     } catch (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: '同步失败，请检查平台凭证配置' };
     }
   }
 }

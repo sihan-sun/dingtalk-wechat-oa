@@ -12,6 +12,7 @@ import { SyncTask, SyncTaskDocument, SyncType } from '../../schemas/sync-task.sc
 import { DingTalkClient } from '../platform/clients/dingtalk.client';
 import { WeComClient } from '../platform/clients/wecom.client';
 import { PlatformStaffDTO } from '../platform/platform.types';
+import { sanitizeErrorMessage } from '../../common/utils/sanitize.util';
 
 /**
  * 核心同步服务
@@ -99,7 +100,7 @@ export class SyncService {
       );
       await this.eventLogModel.findByIdAndUpdate(eventLog._id, {
         handleStatus: 'failed',
-        errorMessage: error.message,
+        errorMessage: sanitizeErrorMessage(error),
         handledAt: new Date(),
       });
       await this.syncErrorLogModel.create({
@@ -107,7 +108,7 @@ export class SyncService {
         platformType: 'dingtalk',
         platformUserId: data.userId || data.userid || undefined,
         errorType: 'event_handle_failed',
-        errorMessage: error.message,
+        errorMessage: sanitizeErrorMessage(error),
         retryCount: 0,
         status: 'pending',
       });
@@ -168,7 +169,7 @@ export class SyncService {
       );
       await this.eventLogModel.findByIdAndUpdate(eventLog._id, {
         handleStatus: 'failed',
-        errorMessage: error.message,
+        errorMessage: sanitizeErrorMessage(error),
         handledAt: new Date(),
       });
       await this.syncErrorLogModel.create({
@@ -176,7 +177,7 @@ export class SyncService {
         platformType: 'wecom',
         platformUserId: data.UserID || data.userId || undefined,
         errorType: 'event_handle_failed',
-        errorMessage: error.message,
+        errorMessage: sanitizeErrorMessage(error),
         retryCount: 0,
         status: 'pending',
       });
@@ -690,7 +691,7 @@ export class SyncService {
     } catch (error) {
       await this.syncTaskModel.findByIdAndUpdate(task._id, {
         status: 'failed',
-        errorMessage: error.message,
+        errorMessage: sanitizeErrorMessage(error),
         endTime: new Date(),
       });
       return { success: false, taskId: task._id, error: error.message };

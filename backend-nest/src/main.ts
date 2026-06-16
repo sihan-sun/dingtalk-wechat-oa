@@ -4,8 +4,10 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
+  const isProduction = process.env.NODE_ENV === 'production';
+
   const app = await NestFactory.create(AppModule, {
-    rawBody: true, // 企业微信 Callback 需要接收原始 XML body
+    rawBody: true,
   });
 
   // 全局校验管道
@@ -17,14 +19,24 @@ async function bootstrap() {
     }),
   );
 
-  // 全局异常过滤器
+  // 全局异常过滤器（生产环境不暴露堆栈）
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  app.enableCors();
+  // CORS：生产环境限制来源，开发环境允许全部
+  if (isProduction) {
+    const allowedOrigin = process.env.CORS_ORIGIN;
+    if (allowedOrigin) {
+      app.enableCors({ origin: allowedOrigin, credentials: true });
+    } else {
+      app.enableCors({ origin: false }); // 仅允许同源
+    }
+  } else {
+    app.enableCors(); // 开发环境允许所有来源
+  }
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  console.log(`[StaffSync] 服务已启动，端口: ${port}`);
+  console.log(`[StaffSync] 服务已启动，端口: ${port}, 环境: ${process.env.NODE_ENV || 'development'}`);
 }
 
 bootstrap();
