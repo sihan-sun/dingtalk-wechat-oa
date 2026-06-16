@@ -1,5 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import { PlatformType } from '../common/enums/platform-type.enum';
+import { StaffStatus } from '../common/enums/staff-status.enum';
 
 export type StaffDocument = Staff & Document;
 
@@ -8,8 +10,8 @@ export class Staff {
   @Prop({ type: Types.ObjectId, ref: 'StaffUnion', index: true })
   unionId?: Types.ObjectId;
 
-  @Prop({ required: true, enum: ['dingtalk', 'wecom'], index: true })
-  platformType: string;
+  @Prop({ required: true, enum: PlatformType, index: true })
+  platformType: PlatformType;
 
   @Prop({ required: true, index: true })
   corpId: string;
@@ -23,13 +25,13 @@ export class Staff {
   @Prop()
   name?: string;
 
-  @Prop({ index: true })
+  @Prop({ index: true, sparse: true })
   mobile?: string;
 
-  @Prop({ index: true })
+  @Prop({ index: true, sparse: true })
   email?: string;
 
-  @Prop({ index: true })
+  @Prop({ index: true, sparse: true })
   jobNumber?: string;
 
   @Prop()
@@ -45,11 +47,11 @@ export class Staff {
   position?: string;
 
   @Prop({
-    enum: ['active', 'inactive', 'inactive_pending', 'resigned', 'deleted'],
-    default: 'active',
+    enum: StaffStatus,
+    default: StaffStatus.ACTIVE,
     index: true,
   })
-  status: string;
+  status: StaffStatus;
 
   @Prop({ default: false })
   isDeleted: boolean;
@@ -77,6 +79,3 @@ StaffSchema.index(
   { platformType: 1, corpId: 1, platformUserId: 1 },
   { unique: true },
 );
-
-// 单字段索引已在 @Prop({ index: true }) 中声明，此处不重复声明
-// 仅保留复合索引

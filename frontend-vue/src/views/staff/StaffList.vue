@@ -48,12 +48,7 @@
       <el-table-column prop="position" label="职位" width="100" />
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
-          <el-tag
-            :type="row.status === 'active' ? 'success' : row.status === 'resigned' ? 'danger' : 'warning'"
-            size="small"
-          >
-            {{ { active: '在职', resigned: '离职', inactive: '停用', inactive_pending: '待确认', deleted: '已删除' }[row.status] || row.status }}
-          </el-tag>
+          <StatusTag :status="row.status" />
         </template>
       </el-table-column>
       <el-table-column label="是否删除" width="80">
@@ -78,37 +73,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { getStaffList, type StaffItem } from '../api/staffs';
+import { useListPage } from '../../composables/useListPage';
+import { getStaffList, type StaffItem } from '../../api/staff';
+import StatusTag from '../../components/StatusTag.vue';
 
-const list = ref<StaffItem[]>([]);
-const total = ref(0);
-const loading = ref(false);
-const page = ref(1);
-const pageSize = ref(20);
-const search = ref({ platformType: '', status: '', name: '', mobile: '' });
-
-async function fetchData() {
-  loading.value = true;
-  try {
-    const params: Record<string, any> = { page: page.value, pageSize: pageSize.value };
-    if (search.value.platformType) params.platformType = search.value.platformType;
-    if (search.value.status) params.status = search.value.status;
-    if (search.value.name) params.name = search.value.name;
-    if (search.value.mobile) params.mobile = search.value.mobile;
-    const res = await getStaffList(params);
-    list.value = res.items;
-    total.value = res.total;
-  } finally {
-    loading.value = false;
-  }
-}
-
-function resetSearch() {
-  search.value = { platformType: '', status: '', name: '', mobile: '' };
-  page.value = 1;
-  fetchData();
-}
-
-onMounted(fetchData);
+const { list, total, loading, page, pageSize, search, fetchData, resetSearch } =
+  useListPage<StaffItem>(getStaffList, { platformType: '', status: '', name: '', mobile: '' });
 </script>

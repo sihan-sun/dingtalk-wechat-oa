@@ -45,12 +45,12 @@
       <el-table-column prop="platformUserId" label="平台用户ID" width="160" />
       <el-table-column label="处理状态" width="90">
         <template #default="{ row }">
-          <el-tag
-            :type="row.handleStatus === 'success' ? 'success' : row.handleStatus === 'failed' ? 'danger' : 'warning'"
-            size="small"
-          >
-            {{ { pending: '待处理', success: '成功', failed: '失败' }[row.handleStatus] || row.handleStatus }}
-          </el-tag>
+          <StatusTag
+            :status="row.handleStatus"
+            category="custom"
+            :label-map="{ pending: '待处理', success: '成功', failed: '失败' }"
+            :color-map="{ pending: 'warning', success: 'success', failed: 'danger' }"
+          />
         </template>
       </el-table-column>
       <el-table-column prop="errorMessage" label="错误信息" min-width="200">
@@ -87,43 +87,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { getEventLogList, type EventLogItem } from '../api/event-logs';
+import { ref } from 'vue';
+import { useListPage } from '../../composables/useListPage';
+import { getEventLogList, type EventLogItem } from '../../api/eventLog';
+import StatusTag from '../../components/StatusTag.vue';
 
-const list = ref<EventLogItem[]>([]);
-const total = ref(0);
-const loading = ref(false);
-const page = ref(1);
-const pageSize = ref(20);
-const search = ref({ platformType: '', eventSource: '', handleStatus: '' });
+const { list, total, loading, page, pageSize, search, fetchData, resetSearch } =
+  useListPage<EventLogItem>(getEventLogList, { platformType: '', eventSource: '', handleStatus: '' });
+
 const payloadVisible = ref(false);
 const payloadData = ref<any>(null);
-
-async function fetchData() {
-  loading.value = true;
-  try {
-    const params: Record<string, any> = { page: page.value, pageSize: pageSize.value };
-    if (search.value.platformType) params.platformType = search.value.platformType;
-    if (search.value.eventSource) params.eventSource = search.value.eventSource;
-    if (search.value.handleStatus) params.handleStatus = search.value.handleStatus;
-    const res = await getEventLogList(params);
-    list.value = res.items;
-    total.value = res.total;
-  } finally {
-    loading.value = false;
-  }
-}
-
-function resetSearch() {
-  search.value = { platformType: '', eventSource: '', handleStatus: '' };
-  page.value = 1;
-  fetchData();
-}
 
 function showPayload(row: EventLogItem) {
   payloadData.value = row.rawPayload;
   payloadVisible.value = true;
 }
-
-onMounted(fetchData);
 </script>

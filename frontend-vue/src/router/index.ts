@@ -12,27 +12,32 @@ const router = createRouter({
         {
           path: 'staff-unions',
           name: 'StaffUnionList',
-          component: () => import('../views/StaffUnionList.vue'),
+          component: () => import('../views/staff-union/StaffUnionList.vue'),
         },
         {
           path: 'staff-unions/:id',
           name: 'StaffUnionDetail',
-          component: () => import('../views/StaffUnionDetail.vue'),
+          component: () => import('../views/staff-union/StaffUnionDetail.vue'),
         },
         {
           path: 'staffs',
           name: 'StaffList',
-          component: () => import('../views/StaffList.vue'),
+          component: () => import('../views/staff/StaffList.vue'),
+        },
+        {
+          path: 'sync-tasks',
+          name: 'SyncTaskList',
+          component: () => import('../views/sync-task/SyncTaskList.vue'),
         },
         {
           path: 'event-logs',
           name: 'EventLogList',
-          component: () => import('../views/EventLogList.vue'),
+          component: () => import('../views/event-log/EventLogList.vue'),
         },
         {
           path: 'sync-errors',
           name: 'SyncErrorList',
-          component: () => import('../views/SyncErrorList.vue'),
+          component: () => import('../views/sync-error/SyncErrorList.vue'),
         },
       ],
     },

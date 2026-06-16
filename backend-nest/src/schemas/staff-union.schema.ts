@@ -8,13 +8,13 @@ export class StaffUnion {
   @Prop()
   name?: string;
 
-  @Prop({ index: true })
+  @Prop({ index: true, sparse: true })
   mobile?: string;
 
-  @Prop({ index: true })
+  @Prop({ index: true, sparse: true })
   email?: string;
 
-  @Prop({ index: true })
+  @Prop({ index: true, sparse: true })
   jobNumber?: string;
 
   @Prop()
@@ -43,4 +43,7 @@ export class StaffUnion {
 
 export const StaffUnionSchema = SchemaFactory.createForClass(StaffUnion);
 
-// 单字段索引已在 @Prop({ index: true }) 中声明，此处不重复声明
+// 稀疏唯一索引：防止同一手机号/邮箱/工号创建重复 union
+StaffUnionSchema.index({ mobile: 1 }, { unique: true, sparse: true });
+StaffUnionSchema.index({ email: 1 }, { unique: true, sparse: true });
+StaffUnionSchema.index({ jobNumber: 1 }, { unique: true, sparse: true });

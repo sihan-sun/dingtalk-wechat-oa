@@ -28,9 +28,7 @@
       <el-table-column prop="jobNumber" label="工号" width="100" />
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'active' ? 'success' : 'danger'" size="small">
-            {{ row.status === 'active' ? '在职' : '离职' }}
-          </el-tag>
+          <StatusTag :status="row.status" />
         </template>
       </el-table-column>
       <el-table-column label="平台" width="160">
@@ -68,42 +66,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { getStaffUnionList, type StaffUnionItem } from '../api/staff-unions';
+import { useListPage } from '../../composables/useListPage';
+import { getStaffUnionList, type StaffUnionItem } from '../../api/staffUnion';
+import StatusTag from '../../components/StatusTag.vue';
 
 const router = useRouter();
-const list = ref<StaffUnionItem[]>([]);
-const total = ref(0);
-const loading = ref(false);
-const page = ref(1);
-const pageSize = ref(20);
-const search = ref({ name: '', mobile: '', status: '' });
-
-async function fetchData() {
-  loading.value = true;
-  try {
-    const params: Record<string, any> = { page: page.value, pageSize: pageSize.value };
-    if (search.value.name) params.name = search.value.name;
-    if (search.value.mobile) params.mobile = search.value.mobile;
-    if (search.value.status) params.status = search.value.status;
-    const res = await getStaffUnionList(params);
-    list.value = res.items;
-    total.value = res.total;
-  } finally {
-    loading.value = false;
-  }
-}
-
-function resetSearch() {
-  search.value = { name: '', mobile: '', status: '' };
-  page.value = 1;
-  fetchData();
-}
+const { list, total, loading, page, pageSize, search, fetchData, resetSearch } =
+  useListPage<StaffUnionItem>(getStaffUnionList, { name: '', mobile: '', status: '' });
 
 function goDetail(row: StaffUnionItem) {
   router.push(`/staff-unions/${row._id}`);
 }
-
-onMounted(fetchData);
 </script>

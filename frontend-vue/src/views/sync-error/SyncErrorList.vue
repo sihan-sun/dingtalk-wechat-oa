@@ -40,12 +40,12 @@
       </el-table-column>
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
-          <el-tag
-            :type="row.status === 'success' ? 'success' : row.status === 'failed' ? 'danger' : row.status === 'ignored' ? 'info' : 'warning'"
-            size="small"
-          >
-            {{ { pending: '待处理', success: '成功', failed: '失败', ignored: '忽略' }[row.status] || row.status }}
-          </el-tag>
+          <StatusTag
+            :status="row.status"
+            category="custom"
+            :label-map="{ pending: '待处理', success: '成功', failed: '失败', ignored: '忽略' }"
+            :color-map="{ pending: 'warning', success: 'success', failed: 'danger', ignored: 'info' }"
+          />
         </template>
       </el-table-column>
       <el-table-column label="创建时间" width="170">
@@ -67,35 +67,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { getSyncErrorList, type SyncErrorItem } from '../api/sync-errors';
+import { useListPage } from '../../composables/useListPage';
+import { getSyncErrorList, type SyncErrorItem } from '../../api/syncError';
+import StatusTag from '../../components/StatusTag.vue';
 
-const list = ref<SyncErrorItem[]>([]);
-const total = ref(0);
-const loading = ref(false);
-const page = ref(1);
-const pageSize = ref(20);
-const search = ref({ platformType: '', status: '' });
-
-async function fetchData() {
-  loading.value = true;
-  try {
-    const params: Record<string, any> = { page: page.value, pageSize: pageSize.value };
-    if (search.value.platformType) params.platformType = search.value.platformType;
-    if (search.value.status) params.status = search.value.status;
-    const res = await getSyncErrorList(params);
-    list.value = res.items;
-    total.value = res.total;
-  } finally {
-    loading.value = false;
-  }
-}
-
-function resetSearch() {
-  search.value = { platformType: '', status: '' };
-  page.value = 1;
-  fetchData();
-}
-
-onMounted(fetchData);
+const { list, total, loading, page, pageSize, search, fetchData, resetSearch } =
+  useListPage<SyncErrorItem>(getSyncErrorList, { platformType: '', status: '' });
 </script>

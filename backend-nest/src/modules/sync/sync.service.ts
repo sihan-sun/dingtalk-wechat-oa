@@ -40,13 +40,6 @@ export class SyncService {
 
   /**
    * 处理钉钉 Stream 事件（统一入口）
-   *
-   * @param event 钉钉 Stream 事件对象
-   *   - event.headers.eventType  事件类型
-   *   - event.headers.eventId    事件唯一 ID
-   *   - event.headers.eventBornTime 事件发生时间
-   *   - event.headers.eventCorpId   企业 ID
-   *   - event.data               事件数据（可能是 JSON 字符串）
    */
   async handleDingTalkEvent(event: any): Promise<void> {
     const headers = event.headers || {};
@@ -55,7 +48,7 @@ export class SyncService {
     const eventCorpId = headers.eventCorpId || 'unknown';
     let data: any = event.data;
 
-    // event.data 可能是 JSON 字符串，需要解析
+    // event.data 可能是 JSON 字符串
     if (typeof data === 'string') {
       try {
         data = JSON.parse(data);
@@ -70,13 +63,13 @@ export class SyncService {
       return;
     }
 
-    // 幂等检查：已处理过的事件直接返回
-    if (await this.isEventProcessed(eventId)) {
+    // 幂等检查
+    if (await this.isEventProcessed(eventId, 'dingtalk')) {
       this.logger.log(`事件已处理，跳过 eventId=${eventId}`);
       return;
     }
 
-    // 创建 event_log 记录（状态 pending）
+    // 创建 event_log
     const eventLog = await this.eventLogModel.create({
       platformType: 'dingtalk',
       eventSource: 'dingtalk_stream',
@@ -90,25 +83,7 @@ export class SyncService {
     });
 
     try {
-      switch (eventType) {
-        case 'user_add_org':
-          await this.handleUserAdd(eventCorpId, data);
-          break;
-        case 'user_modify_org':
-          await this.handleUserModify(eventCorpId, data);
-          break;
-        case 'user_leave_org':
-          await this.handleUserLeave(eventCorpId, data);
-          break;
-        case 'user_active_org':
-          // 激活：等同于新增同步
-          await this.handleUserAdd(eventCorpId, data);
-          break;
-        default:
-          this.logger.log(`未处理的事件类型: ${eventType}`);
-      }
-
-      // 标记事件处理成功
+      await this.processEvent(eventType, eventCorpId, data, 'dingtalk');
       await this.eventLogModel.findByIdAndUpdate(eventLog._id, {
         handleStatus: 'success',
         handledAt: new Date(),
@@ -118,15 +93,11 @@ export class SyncService {
         `事件处理失败 eventId=${eventId} eventType=${eventType}`,
         error.stack,
       );
-
-      // 标记事件处理失败
       await this.eventLogModel.findByIdAndUpdate(eventLog._id, {
         handleStatus: 'failed',
         errorMessage: error.message,
         handledAt: new Date(),
       });
-
-      // 记录错误日志
       await this.syncErrorLogModel.create({
         eventLogId: eventLog._id,
         platformType: 'dingtalk',
@@ -136,26 +107,18 @@ export class SyncService {
         retryCount: 0,
         status: 'pending',
       });
-
-      // 不抛出异常 — Stream 连接不应因单个事件失败而中断
     }
   }
 
   /**
-   * 处理企业微信 Callback 事件（与 handleDingTalkEvent 平行）
-   *
-   * WeComCallbackService 解密 XML 后构造 event 对象传入此方法，
-   * 结构与钉钉 Stream 事件一致：
-   *   event.headers.eventType   'create_user' | 'update_user' | 'delete_user'
-   *   event.headers.eventId     由 WeComCallbackService 生成的唯一 ID
-   *   event.headers.eventCorpId 企业微信 CorpId
-   *   event.data                解析后的用户数据 JSON
+   * 处理企业微信 Callback 事件
    */
   async handleWeComEvent(event: any): Promise<void> {
     const headers = event.headers || {};
     const eventType = headers.eventType as string;
     const eventId = headers.eventId as string;
-    const eventCorpId = process.env.WECOM_CORP_ID || headers.eventCorpId || 'unknown';
+    const eventCorpId =
+      process.env.WECOM_CORP_ID || headers.eventCorpId || 'unknown';
     let data: any = event.data;
 
     if (typeof data === 'string') {
@@ -171,7 +134,6 @@ export class SyncService {
       return;
     }
 
-    // 幂等检查
     if (await this.isEventProcessed(eventId, 'wecom')) {
       this.logger.log(`企业微信事件已处理，跳过 eventId=${eventId}`);
       return;
@@ -190,20 +152,7 @@ export class SyncService {
     });
 
     try {
-      switch (eventType) {
-        case 'create_user':
-          await this.handleWeComUserAdd(data);
-          break;
-        case 'update_user':
-          await this.handleWeComUserModify(data);
-          break;
-        case 'delete_user':
-          await this.handleWeComUserLeave(data);
-          break;
-        default:
-          this.logger.log(`未处理的企业微信事件类型: ${eventType}`);
-      }
-
+      await this.processEvent(eventType, eventCorpId, data, 'wecom');
       await this.eventLogModel.findByIdAndUpdate(eventLog._id, {
         handleStatus: 'success',
         handledAt: new Date(),
@@ -213,13 +162,11 @@ export class SyncService {
         `企业微信事件处理失败 eventId=${eventId} eventType=${eventType}`,
         error.stack,
       );
-
       await this.eventLogModel.findByIdAndUpdate(eventLog._id, {
         handleStatus: 'failed',
         errorMessage: error.message,
         handledAt: new Date(),
       });
-
       await this.syncErrorLogModel.create({
         eventLogId: eventLog._id,
         platformType: 'wecom',
@@ -233,87 +180,101 @@ export class SyncService {
   }
 
   // ============================================================
-  // 事件类型处理
+  // 统一事件分发
   // ============================================================
 
   /**
-   * 处理员工入职 (user_add_org)
-   *
-   * 流程：
-   * 1. 通过钉钉 API 获取员工详情
-   * 2. upsert staff
-   * 3. 匹配或创建 staff_union
-   * 4. 刷新 union 状态
+   * 统一事件处理分发
+   * 合并了原来分散的 DingTalk/WeCom 事件处理逻辑
    */
-  private async handleUserAdd(corpId: string, data: any) {
-    const userId = data.userId || data.userid;
+  private async processEvent(
+    eventType: string,
+    corpId: string,
+    data: any,
+    platformType: string,
+  ): Promise<void> {
+    const userId =
+      platformType === 'wecom'
+        ? data.UserID || data.userId
+        : data.userId || data.userid;
+
     if (!userId) {
-      this.logger.warn('user_add_org 事件缺少 userId');
+      this.logger.warn(`${eventType} 事件缺少 userId`);
       return;
     }
 
-    let staffDTO;
-    try {
-      staffDTO = await this.dingTalkClient.getUserDetail(userId, corpId);
-    } catch (error) {
-      // API 调用失败时，用事件 data 作为降级数据
-      this.logger.warn(
-        `获取员工详情失败，使用事件数据降级处理 userId=${userId}`,
-      );
-      staffDTO = this.buildFallbackDTO(corpId, data);
-    }
+    switch (eventType) {
+      // 钉钉事件
+      case 'user_add_org':
+      case 'user_modify_org':
+      case 'user_active_org':
+        await this.handleUserUpdate(corpId, data, platformType);
+        break;
+      case 'user_leave_org':
+        await this.handleUserLeave(corpId, data);
+        break;
 
-    const staff = await this.upsertStaff(staffDTO);
+      // 企业微信事件
+      case 'create_user':
+      case 'update_user':
+        await this.handleUserUpdate(corpId, data, platformType);
+        break;
+      case 'delete_user':
+        await this.handleWeComUserLeave(data);
+        break;
 
-    // 如果 staff 还没有 unionId，按规则匹配或创建
-    if (!staff.unionId) {
-      await this.matchAndBindUnion(staff);
-    } else {
-      // 已有 union，刷新其状态
-      await this.refreshUnion(staff.unionId.toString());
+      default:
+        this.logger.log(`未处理的事件类型: ${eventType}`);
     }
   }
 
   /**
-   * 处理员工信息修改 (user_modify_org)
+   * 处理员工入职/修改（统一钉钉和企微）
    */
-  private async handleUserModify(corpId: string, data: any) {
-    const userId = data.userId || data.userid;
-    if (!userId) {
-      this.logger.warn('user_modify_org 事件缺少 userId');
-      return;
-    }
+  private async handleUserUpdate(
+    corpId: string,
+    data: any,
+    platformType: string,
+  ): Promise<void> {
+    const userId =
+      platformType === 'wecom'
+        ? data.UserID || data.userId
+        : data.userId || data.userid;
+
+    if (!userId) return;
 
     let staffDTO;
+    const client =
+      platformType === 'wecom' ? this.weComClient : this.dingTalkClient;
+
     try {
-      staffDTO = await this.dingTalkClient.getUserDetail(userId, corpId);
+      if (platformType === 'wecom') {
+        staffDTO = await this.weComClient.getUserDetail(userId);
+      } else {
+        staffDTO = await this.dingTalkClient.getUserDetail(userId, corpId);
+      }
     } catch {
       this.logger.warn(
         `获取员工详情失败，使用事件数据降级处理 userId=${userId}`,
       );
-      staffDTO = this.buildFallbackDTO(corpId, data);
+      staffDTO = this.buildFallbackDTO(corpId, data, platformType);
     }
 
     const staff = await this.upsertStaff(staffDTO);
 
-    if (staff.unionId) {
-      await this.refreshUnion(staff.unionId.toString());
-    } else {
+    if (!staff.unionId) {
       await this.matchAndBindUnion(staff);
+    } else {
+      await this.refreshUnion(staff.unionId.toString());
     }
   }
 
   /**
-   * 处理员工离职 (user_leave_org)
-   *
-   * 离职员工不物理删除，仅修改状态为 resigned
+   * 处理钉钉员工离职
    */
   private async handleUserLeave(corpId: string, data: any) {
     const userId = data.userId || data.userid;
-    if (!userId) {
-      this.logger.warn('user_leave_org 事件缺少 userId');
-      return;
-    }
+    if (!userId) return;
 
     const staff = await this.staffModel.findOneAndUpdate(
       {
@@ -334,7 +295,9 @@ export class SyncService {
     );
 
     if (!staff) {
-      this.logger.warn(`未找到离职员工 staff, userId=${userId}, corpId=${corpId}`);
+      this.logger.warn(
+        `未找到离职员工 staff, userId=${userId}, corpId=${corpId}`,
+      );
       return;
     }
 
@@ -343,97 +306,12 @@ export class SyncService {
     }
   }
 
-  // ============================================================
-  // 核心方法
-  // ============================================================
-
   /**
-   * 幂等检查：通过 eventId 判断事件是否已成功处理
-   * @param platformType 平台类型，默认 'dingtalk'
-   */
-  private async isEventProcessed(
-    eventId: string,
-    platformType: string = 'dingtalk',
-  ): Promise<boolean> {
-    const existing = await this.eventLogModel.findOne({
-      platformType,
-      eventId,
-      handleStatus: 'success',
-    });
-    return !!existing;
-  }
-
-  // ============================================================
-  // 企业微信事件处理
-  // ============================================================
-
-  /**
-   * 企业微信员工入职 (create_user)
-   */
-  private async handleWeComUserAdd(data: any) {
-    const userId = data.UserID || data.userId;
-    if (!userId) {
-      this.logger.warn('create_user 事件缺少 UserID');
-      return;
-    }
-
-    let staffDTO;
-    try {
-      staffDTO = await this.weComClient.getUserDetail(userId);
-    } catch {
-      this.logger.warn(
-        `获取企业微信员工详情失败，使用事件数据降级处理 userId=${userId}`,
-      );
-      staffDTO = this.buildWeComFallbackDTO(data);
-    }
-
-    const staff = await this.upsertStaff(staffDTO);
-
-    if (!staff.unionId) {
-      await this.matchAndBindUnion(staff);
-    } else {
-      await this.refreshUnion(staff.unionId.toString());
-    }
-  }
-
-  /**
-   * 企业微信员工信息修改 (update_user)
-   */
-  private async handleWeComUserModify(data: any) {
-    const userId = data.UserID || data.userId;
-    if (!userId) {
-      this.logger.warn('update_user 事件缺少 UserID');
-      return;
-    }
-
-    let staffDTO;
-    try {
-      staffDTO = await this.weComClient.getUserDetail(userId);
-    } catch {
-      this.logger.warn(
-        `获取企业微信员工详情失败，使用事件数据降级处理 userId=${userId}`,
-      );
-      staffDTO = this.buildWeComFallbackDTO(data);
-    }
-
-    const staff = await this.upsertStaff(staffDTO);
-
-    if (staff.unionId) {
-      await this.refreshUnion(staff.unionId.toString());
-    } else {
-      await this.matchAndBindUnion(staff);
-    }
-  }
-
-  /**
-   * 企业微信员工离职/删除 (delete_user)
+   * 处理企业微信员工离职
    */
   private async handleWeComUserLeave(data: any) {
     const userId = data.UserID || data.userId;
-    if (!userId) {
-      this.logger.warn('delete_user 事件缺少 UserID');
-      return;
-    }
+    if (!userId) return;
 
     const corpId = process.env.WECOM_CORP_ID || '';
 
@@ -457,7 +335,7 @@ export class SyncService {
 
     if (!staff) {
       this.logger.warn(
-        `未找到企业微信离职员工 staff, userId=${userId}, corpId=${corpId}`,
+        `未找到企业微信离职员工 staff, userId=${userId}`,
       );
       return;
     }
@@ -467,32 +345,27 @@ export class SyncService {
     }
   }
 
+  // ============================================================
+  // 核心方法
+  // ============================================================
+
   /**
-   * 企业微信事件数据降级构建 DTO
+   * 幂等检查：通过 eventId 判断事件是否已成功处理
    */
-  private buildWeComFallbackDTO(data: any) {
-    return {
-      platformType: 'wecom' as const,
-      corpId: process.env.WECOM_CORP_ID || '',
-      platformUserId: data.UserID || data.userId || '',
-      name: data.Name || data.name,
-      mobile: data.Mobile || data.mobile,
-      email: data.Email || data.email,
-      jobNumber: data.Position || data.position,
-      departmentIds: data.Department
-        ? String(data.Department).split(',').map((s) => s.trim())
-        : [],
-      departmentNames: [],
-      position: data.Position || data.position,
-      status: 'active' as const,
-      rawData: data,
-    };
+  private async isEventProcessed(
+    eventId: string,
+    platformType: string = 'dingtalk',
+  ): Promise<boolean> {
+    const existing = await this.eventLogModel.findOne({
+      platformType,
+      eventId,
+      handleStatus: 'success',
+    });
+    return !!existing;
   }
 
   /**
    * upsert staff — 存在则更新，不存在则创建
-   *
-   * 使用 platformType + corpId + platformUserId 唯一索引保证幂等
    */
   async upsertStaff(dto: {
     platformType: string;
@@ -548,12 +421,12 @@ export class SyncService {
    * 按规则匹配已有 staff_union，匹配到则绑定，否则新建
    *
    * 匹配优先级：mobile → jobNumber → email
+   * 使用 findOneAndUpdate 原子操作防止竞态
    */
   async matchAndBindUnion(staff: StaffDocument): Promise<StaffUnionDocument> {
     const matchResult = await this.findMatchedUnion(staff);
 
     if (matchResult) {
-      // 匹配到已有 union，绑定
       await this.staffModel.findByIdAndUpdate(staff._id, {
         unionId: matchResult.union._id,
       });
@@ -561,7 +434,7 @@ export class SyncService {
       return matchResult.union;
     }
 
-    // 没有匹配到，新建 union
+    // 新建 union — 使用 findOneAndUpdate + upsert 原子操作防止竞态
     return this.createUnionFromStaff(staff);
   }
 
@@ -573,7 +446,6 @@ export class SyncService {
     matchRule: string;
     matchKey: string;
   } | null> {
-    // 优先级 1: 手机号
     if (staff.mobile) {
       const union = await this.staffUnionModel.findOne({
         mobile: staff.mobile,
@@ -583,7 +455,6 @@ export class SyncService {
       }
     }
 
-    // 优先级 2: 工号
     if (staff.jobNumber) {
       const union = await this.staffUnionModel.findOne({
         jobNumber: staff.jobNumber,
@@ -593,7 +464,6 @@ export class SyncService {
       }
     }
 
-    // 优先级 3: 邮箱
     if (staff.email) {
       const union = await this.staffUnionModel.findOne({
         email: staff.email,
@@ -608,14 +478,14 @@ export class SyncService {
 
   /**
    * 以 staff 信息创建新的 staff_union，并将 staff 绑定上去
+   * 使用唯一索引 + 捕获重复键来处理竞态条件
    */
   async createUnionFromStaff(
     staff: StaffDocument,
     matchRule = 'self',
   ): Promise<StaffUnionDocument> {
-    const union = await this.staffUnionModel.create({
+    const createData: Record<string, any> = {
       name: staff.name,
-      mobile: staff.mobile,
       email: staff.email,
       jobNumber: staff.jobNumber,
       avatar: staff.avatar,
@@ -623,13 +493,35 @@ export class SyncService {
       matchKey: staff.mobile || staff.jobNumber || staff.email || '',
       matchRule,
       conflictStatus: 'none',
-    });
+    };
 
-    await this.staffModel.findByIdAndUpdate(staff._id, {
-      unionId: union._id,
-    });
+    // 只有当字段有值时才包含（避免空字符串触发稀疏唯一索引）
+    if (staff.mobile) createData.mobile = staff.mobile;
 
-    return union;
+    try {
+      const union = await this.staffUnionModel.create(createData);
+
+      await this.staffModel.findByIdAndUpdate(staff._id, {
+        unionId: union._id,
+      });
+
+      return union;
+    } catch (error: any) {
+      // 如果因为唯一索引冲突失败，说明并发创建了，重新查找
+      if (error.code === 11000) {
+        this.logger.warn(
+          `union 创建冲突，重试匹配 userId=${staff.platformUserId}`,
+        );
+        const matchResult = await this.findMatchedUnion(staff);
+        if (matchResult) {
+          await this.staffModel.findByIdAndUpdate(staff._id, {
+            unionId: matchResult.union._id,
+          });
+          return matchResult.union;
+        }
+      }
+      throw error;
+    }
   }
 
   /**
@@ -639,7 +531,6 @@ export class SyncService {
    * 状态规则：任意一个 staff active → union active
    */
   async refreshUnion(unionId: string): Promise<void> {
-    // 显式转换为 ObjectId；Mongoose find() 对字符串参数不会自动转换
     const staffs = await this.staffModel.find({
       unionId: new Types.ObjectId(unionId),
     });
@@ -650,7 +541,6 @@ export class SyncService {
     }
 
     const activeStaffs = staffs.filter((s) => s.status === 'active');
-    // 优先取 active 的 staff 作为信息源，否则取第一个
     const selectedStaff = activeStaffs[0] || staffs[0];
     const status = activeStaffs.length > 0 ? 'active' : 'resigned';
 
@@ -665,20 +555,36 @@ export class SyncService {
   }
 
   /**
-   * 当 API 调用失败时，用事件数据的降级数据构建 DTO
+   * 统一构建降级 DTO（合并原来的 buildFallbackDTO 和 buildWeComFallbackDTO）
    */
-  private buildFallbackDTO(corpId: string, data: any) {
+  private buildFallbackDTO(
+    corpId: string,
+    data: any,
+    platformType: string,
+  ) {
+    const isWeCom = platformType === 'wecom';
+
     return {
-      platformType: 'dingtalk' as const,
-      corpId,
-      platformUserId: data.userId || data.userid || '',
-      name: data.name || data.userName,
-      mobile: data.mobile,
-      email: data.email || data.orgEmail,
-      jobNumber: data.jobNumber,
-      departmentIds: data.deptIdList?.map(String) || [],
+      platformType: isWeCom ? ('wecom' as const) : ('dingtalk' as const),
+      corpId: isWeCom
+        ? process.env.WECOM_CORP_ID || ''
+        : corpId,
+      platformUserId: isWeCom
+        ? data.UserID || data.userId || ''
+        : data.userId || data.userid || '',
+      name: isWeCom ? data.Name || data.name : data.name || data.userName,
+      mobile: data.mobile || data.Mobile || undefined,
+      email: isWeCom
+        ? data.Email || data.email
+        : data.email || data.orgEmail,
+      jobNumber: data.jobNumber || data.Position || data.position || undefined,
+      departmentIds: isWeCom
+        ? data.Department
+          ? String(data.Department).split(',').map((s: string) => s.trim())
+          : []
+        : data.deptIdList?.map(String) || [],
       departmentNames: [],
-      position: data.title,
+      position: data.title || data.Position || data.position || undefined,
       status: 'active' as const,
       rawData: data,
     };

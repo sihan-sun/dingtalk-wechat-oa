@@ -23,6 +23,9 @@
         <el-menu-item index="/sync-errors">
           <span>同步错误</span>
         </el-menu-item>
+        <el-menu-item index="/sync-tasks">
+          <span>同步任务</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

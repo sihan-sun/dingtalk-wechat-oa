@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Staff, StaffDocument } from '../../schemas/staff.schema';
@@ -45,5 +45,15 @@ export class StaffController {
     ]);
 
     return { items, total, page: pageNum, pageSize: size };
+  }
+
+  /**
+   * GET /api/staffs/:id
+   * 员工详情
+   */
+  @Get(':id')
+  async detail(@Param('id') id: string): Promise<any> {
+    const staff = await this.staffModel.findById(id).lean().exec();
+    return staff || null;
   }
 }

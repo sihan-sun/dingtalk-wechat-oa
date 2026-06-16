@@ -10,9 +10,7 @@
         <el-descriptions-item label="邮箱">{{ detail.email || '-' }}</el-descriptions-item>
         <el-descriptions-item label="工号">{{ detail.jobNumber || '-' }}</el-descriptions-item>
         <el-descriptions-item label="状态">
-          <el-tag :type="detail.status === 'active' ? 'success' : 'danger'" size="small">
-            {{ detail.status === 'active' ? '在职' : '离职' }}
-          </el-tag>
+          <StatusTag :status="detail.status" />
         </el-descriptions-item>
         <el-descriptions-item label="合并规则">{{ detail.matchRule || '-' }}</el-descriptions-item>
         <el-descriptions-item label="合并依据">{{ detail.matchKey || '-' }}</el-descriptions-item>
@@ -42,12 +40,7 @@
         <el-table-column prop="email" label="邮箱" min-width="160" />
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
-            <el-tag
-              :type="row.status === 'active' ? 'success' : row.status === 'resigned' ? 'danger' : 'warning'"
-              size="small"
-            >
-              {{ { active: '在职', resigned: '离职', inactive: '停用', deleted: '已删除' }[row.status] || row.status }}
-            </el-tag>
+            <StatusTag :status="row.status" />
           </template>
         </el-table-column>
         <el-table-column prop="position" label="职位" width="100" />
@@ -71,7 +64,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
-import { getStaffUnionDetail, type StaffUnionDetail } from '../api/staff-unions';
+import { getStaffUnionDetail, type StaffUnionDetail } from '../../api/staffUnion';
+import StatusTag from '../../components/StatusTag.vue';
 
 const route = useRoute();
 const detail = ref<StaffUnionDetail | null>(null);

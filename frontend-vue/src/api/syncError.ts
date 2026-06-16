@@ -1,16 +1,7 @@
 import request from './request';
+import type { SyncErrorItem } from '../types/sync';
 
-export interface SyncErrorItem {
-  _id: string;
-  platformType: string;
-  platformUserId?: string;
-  errorType?: string;
-  errorMessage: string;
-  retryCount: number;
-  nextRetryAt?: string;
-  status: string;
-  createdAt: string;
-}
+export type { SyncErrorItem };
 
 export function getSyncErrorList(params: Record<string, any>) {
   return request.get('/sync-errors', { params }) as Promise<{

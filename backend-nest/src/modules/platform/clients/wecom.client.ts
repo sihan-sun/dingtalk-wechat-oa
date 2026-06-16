@@ -109,7 +109,7 @@ export class WeComClient {
       name: wecomUser.name,
       mobile: wecomUser.mobile || undefined,
       email: wecomUser.email || undefined,
-      jobNumber: wecomUser.position || undefined,
+      jobNumber: wecomUser.job_number || wecomUser.employee_id || undefined,
       avatar: wecomUser.avatar || undefined,
       departmentIds,
       departmentNames: [], // 需要额外调用部门接口获取名称
@@ -134,5 +134,61 @@ export class WeComClient {
       return 'inactive';
     }
     return 'active';
+  }
+
+  /**
+   * 获取部门列表
+   */
+  async getDepartmentList(parentId = 1): Promise<any[]> {
+    const token = await this.getAccessToken();
+
+    try {
+      const res = await this.http.get('/cgi-bin/department/list', {
+        params: { access_token: token, id: parentId },
+      });
+
+      if (res.data.errcode !== 0) {
+        this.logger.error(
+          `企业微信获取部门列表失败: ${res.data.errmsg}`,
+        );
+        return [];
+      }
+
+      return res.data.department || [];
+    } catch (error) {
+      this.logger.error('获取企业微信部门列表失败', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * 获取指定部门下的员工列表
+   */
+  async getDepartmentUsers(deptId: number | string): Promise<PlatformStaffDTO[]> {
+    const token = await this.getAccessToken();
+
+    try {
+      const res = await this.http.get('/cgi-bin/user/list', {
+        params: {
+          access_token: token,
+          department_id: deptId,
+          fetch_child: 0,
+        },
+      });
+
+      if (res.data.errcode !== 0) {
+        // 部门可能无成员
+        return [];
+      }
+
+      const userList: any[] = res.data.userlist || [];
+      return userList.map((u: any) => this.transformToDTO(u));
+    } catch (error) {
+      this.logger.error(
+        `获取企业微信部门成员失败 deptId=${deptId}`,
+        error.message,
+      );
+      return [];
+    }
   }
 }

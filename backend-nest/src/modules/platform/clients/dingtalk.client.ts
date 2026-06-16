@@ -117,6 +117,49 @@ export class DingTalkClient {
   }
 
   /**
+   * 获取所有部门 ID 列表（顶层，parentId=1）
+   */
+  async getDepartmentIds(parentId = 1): Promise<string[]> {
+    const token = await this.getAccessToken();
+
+    try {
+      const res = await this.http.post('/v1.0/contact/departments/list', {
+        parentId,
+      });
+
+      const deptList: any[] = res.data?.result || res.data || [];
+      return deptList.map((d: any) => String(d.deptId || d.dept_id));
+    } catch (error) {
+      this.logger.error('获取钉钉部门列表失败', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * 获取指定部门下的员工列表
+   */
+  async getDepartmentUsers(deptId: string): Promise<PlatformStaffDTO[]> {
+    const token = await this.getAccessToken();
+    const corpId = process.env.DINGTALK_CLIENT_ID || '';
+
+    try {
+      const res = await this.http.post('/v1.0/contact/users/list', {
+        deptId: Number(deptId),
+        maxResults: 100,
+      });
+
+      const userList: any[] = res.data?.result?.list || res.data?.list || [];
+      return userList.map((u: any) => this.transformToDTO(u, corpId));
+    } catch (error) {
+      this.logger.error(
+        `获取钉钉部门成员失败 deptId=${deptId}`,
+        error.message,
+      );
+      return [];
+    }
+  }
+
+  /**
    * 从钉钉数据中提取手机号（可能在不同字段中）
    */
   private extractMobile(user: any): string | undefined {

@@ -1,5 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import { PlatformType } from '../common/enums/platform-type.enum';
+import { HandleStatus } from '../common/enums/handle-status.enum';
 
 export type SyncErrorLogDocument = SyncErrorLog & Document;
 
@@ -11,8 +13,8 @@ export class SyncErrorLog {
   @Prop({ type: Types.ObjectId, ref: 'EventLog' })
   eventLogId?: Types.ObjectId;
 
-  @Prop({ required: true, enum: ['dingtalk', 'wecom'], index: true })
-  platformType: string;
+  @Prop({ required: true, enum: PlatformType, index: true })
+  platformType: PlatformType;
 
   @Prop({ index: true })
   platformUserId?: string;
@@ -30,8 +32,8 @@ export class SyncErrorLog {
   nextRetryAt?: Date;
 
   @Prop({
-    enum: ['pending', 'success', 'failed', 'ignored'],
-    default: 'pending',
+    enum: [...Object.values(HandleStatus), 'ignored'],
+    default: HandleStatus.PENDING,
     index: true,
   })
   status: string;

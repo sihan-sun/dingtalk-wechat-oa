@@ -1,19 +1,26 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
+import { PlatformType } from '../common/enums/platform-type.enum';
+import { HandleStatus } from '../common/enums/handle-status.enum';
 
 export type EventLogDocument = EventLog & Document;
 
+export enum EventSource {
+  DINGTALK_STREAM = 'dingtalk_stream',
+  WECOM_CALLBACK = 'wecom_callback',
+}
+
 @Schema({ timestamps: true })
 export class EventLog {
-  @Prop({ required: true, enum: ['dingtalk', 'wecom'], index: true })
-  platformType: string;
+  @Prop({ required: true, enum: PlatformType, index: true })
+  platformType: PlatformType;
 
   @Prop({
     required: true,
-    enum: ['dingtalk_stream', 'wecom_callback'],
+    enum: EventSource,
     index: true,
   })
-  eventSource: string;
+  eventSource: EventSource;
 
   @Prop()
   corpId?: string;
@@ -31,11 +38,11 @@ export class EventLog {
   rawPayload: Record<string, any>;
 
   @Prop({
-    enum: ['pending', 'success', 'failed'],
-    default: 'pending',
+    enum: HandleStatus,
+    default: HandleStatus.PENDING,
     index: true,
   })
-  handleStatus: string;
+  handleStatus: HandleStatus;
 
   @Prop()
   errorMessage?: string;
@@ -49,7 +56,6 @@ export class EventLog {
 
 export const EventLogSchema = SchemaFactory.createForClass(EventLog);
 
-// eventId 用于幂等：同一个平台 + 同一个事件ID 不应重复处理
+// eventId 幂等索引
 EventLogSchema.index({ platformType: 1, eventId: 1 });
-// handleStatus 索引已在 @Prop({ index: true }) 中声明
 EventLogSchema.index({ createdAt: -1 });
