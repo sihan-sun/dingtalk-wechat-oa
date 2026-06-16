@@ -8,8 +8,10 @@ import {
   SyncErrorLog,
   SyncErrorLogDocument,
 } from '../../schemas/sync-error-log.schema';
+import { SyncTask, SyncTaskDocument, SyncType } from '../../schemas/sync-task.schema';
 import { DingTalkClient } from '../platform/clients/dingtalk.client';
 import { WeComClient } from '../platform/clients/wecom.client';
+import { PlatformStaffDTO } from '../platform/platform.types';
 
 /**
  * 核心同步服务
@@ -30,6 +32,8 @@ export class SyncService {
     private eventLogModel: Model<EventLogDocument>,
     @InjectModel(SyncErrorLog.name)
     private syncErrorLogModel: Model<SyncErrorLogDocument>,
+    @InjectModel(SyncTask.name)
+    private syncTaskModel: Model<SyncTaskDocument>,
     private readonly dingTalkClient: DingTalkClient,
     private readonly weComClient: WeComClient,
   ) {}
@@ -588,5 +592,108 @@ export class SyncService {
       status: 'active' as const,
       rawData: data,
     };
+  }
+
+  // ============================================================
+  // 全量同步（供 SyncController 和 TaskService 共用）
+  // ============================================================
+
+  async syncFull(platformType: 'dingtalk' | 'wecom'): Promise<{
+    success: boolean;
+    taskId?: any;
+    total?: number;
+    successCount?: number;
+    failCount?: number;
+    error?: string;
+  }> {
+    const client = platformType === 'wecom' ? this.weComClient : this.dingTalkClient;
+    const corpId = platformType === 'wecom'
+      ? process.env.WECOM_CORP_ID || ''
+      : process.env.DINGTALK_CLIENT_ID || '';
+
+    const task = await this.syncTaskModel.create({
+      platformType,
+      syncType: SyncType.FULL,
+      status: 'running',
+      startTime: new Date(),
+    });
+
+    try {
+      let users: PlatformStaffDTO[] = [];
+      try {
+        if (platformType === 'wecom') {
+          const depts = await this.weComClient.getDepartmentList();
+          if (depts.length === 0) {
+            users = await this.weComClient.getDepartmentUsers(1);
+          } else {
+            const userIdSet = new Set<string>();
+            for (const d of depts) {
+              try {
+                const members = await this.weComClient.getDepartmentUsers(d.id);
+                for (const m of members) {
+                  if (!userIdSet.has(m.platformUserId)) {
+                    userIdSet.add(m.platformUserId);
+                    users.push(m);
+                  }
+                }
+              } catch { /* skip empty */ }
+            }
+          }
+        } else {
+          const deptIds = await this.dingTalkClient.getDepartmentIds();
+          const userIdSet = new Set<string>();
+          for (const deptId of deptIds) {
+            const members = await this.dingTalkClient.getDepartmentUsers(deptId);
+            for (const m of members) {
+              if (!userIdSet.has(m.platformUserId)) {
+                userIdSet.add(m.platformUserId);
+                users.push(m);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        this.logger.warn(`${platformType} 部门获取失败: ${error.message}`);
+      }
+
+      let successCount = 0;
+      let failCount = 0;
+      for (const dto of users) {
+        try {
+          const staff = await this.upsertStaff(dto);
+          if (!staff.unionId) {
+            await this.matchAndBindUnion(staff);
+          } else {
+            await this.refreshUnion(staff.unionId.toString());
+          }
+          successCount++;
+        } catch {
+          failCount++;
+        }
+      }
+
+      await this.syncTaskModel.findByIdAndUpdate(task._id, {
+        status: failCount === 0 ? 'success' : 'partial_success',
+        totalCount: users.length,
+        successCount,
+        failCount,
+        endTime: new Date(),
+      });
+
+      return {
+        success: true,
+        taskId: task._id,
+        total: users.length,
+        successCount,
+        failCount,
+      };
+    } catch (error) {
+      await this.syncTaskModel.findByIdAndUpdate(task._id, {
+        status: 'failed',
+        errorMessage: error.message,
+        endTime: new Date(),
+      });
+      return { success: false, taskId: task._id, error: error.message };
+    }
   }
 }

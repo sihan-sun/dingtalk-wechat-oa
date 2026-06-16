@@ -2,6 +2,7 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Staff, StaffDocument } from '../../schemas/staff.schema';
+import { sanitizeSearch } from '../../common/utils/sanitize.util';
 
 @Controller('api/staffs')
 export class StaffController {
@@ -30,8 +31,8 @@ export class StaffController {
     const filter: any = {};
     if (platformType) filter.platformType = platformType;
     if (status) filter.status = status;
-    if (name) filter.name = { $regex: name, $options: 'i' };
-    if (mobile) filter.mobile = { $regex: mobile, $options: 'i' };
+    if (name) filter.name = { $regex: sanitizeSearch(name as string), $options: 'i' };
+    if (mobile) filter.mobile = { $regex: sanitizeSearch(mobile as string), $options: 'i' };
 
     const [items, total] = await Promise.all([
       this.staffModel

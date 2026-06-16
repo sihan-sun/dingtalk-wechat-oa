@@ -1,0 +1,75 @@
+[
+  {
+    "_comment": "钉钉员工 - 张三",
+    "eventType": "user_add_org",
+    "userId": "dt-zhangsan",
+    "name": "张三",
+    "mobile": "13800001111",
+    "email": "zhangsan@example.com",
+    "jobNumber": "EMP001",
+    "departmentIds": ["D001"],
+    "position": "前端工程师"
+  },
+  {
+    "_comment": "企业微信员工 - 李四",
+    "eventSource": "wecom_callback",
+    "eventType": "create_user",
+    "userId": "wc-lisi",
+    "name": "李四",
+    "mobile": "13900002222",
+    "email": "lisi@wecom.com",
+    "jobNumber": "EMP002",
+    "departmentIds": ["D001", "D002"],
+    "position": "后端工程师"
+  },
+  {
+    "_comment": "钉钉员工 - 李四（与上面同一手机号，测试跨平台自动合并）",
+    "eventType": "user_add_org",
+    "userId": "dt-lisi",
+    "name": "李四",
+    "mobile": "13900002222",
+    "email": "lisi@dingtalk.com",
+    "jobNumber": "EMP002",
+    "departmentIds": ["D001"],
+    "position": "后端工程师"
+  },
+  {
+    "_comment": "企业微信员工 - 王五",
+    "eventSource": "wecom_callback",
+    "eventType": "create_user",
+    "userId": "wc-wangwu",
+    "name": "王五",
+    "mobile": "13700003333",
+    "email": "wangwu@wecom.com",
+    "jobNumber": "EMP003",
+    "departmentIds": ["D003"],
+    "position": "产品经理"
+  },
+  {
+    "_comment": "钉钉员工 - 王五（与上面合并）",
+    "eventType": "user_add_org",
+    "userId": "dt-wangwu",
+    "name": "王五",
+    "mobile": "13700003333",
+    "email": "wangwu@dingtalk.com",
+    "jobNumber": "EMP003",
+    "departmentIds": ["D003"],
+    "position": "产品经理"
+  },
+  {
+    "_comment": "钉钉员工 - 赵六（单平台，无企微）",
+    "eventType": "user_add_org",
+    "userId": "dt-zhaoliu",
+    "name": "赵六",
+    "mobile": "13600004444",
+    "email": "zhaoliu@example.com",
+    "jobNumber": "EMP004",
+    "departmentIds": ["D004"],
+    "position": "UI设计师"
+  },
+  {
+    "_comment": "钉钉员工 - 张三离职",
+    "eventType": "user_leave_org",
+    "userId": "dt-zhangsan"
+  }
+]

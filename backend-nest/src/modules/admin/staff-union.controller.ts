@@ -14,6 +14,7 @@ import {
   StaffUnion,
   StaffUnionDocument,
 } from '../../schemas/staff-union.schema';
+import { sanitizeSearch } from '../../common/utils/sanitize.util';
 
 @Controller('api/staff-unions')
 export class StaffUnionController {
@@ -41,8 +42,8 @@ export class StaffUnionController {
     const skip = (pageNum - 1) * size;
 
     const filter: any = {};
-    if (name) filter.name = { $regex: name, $options: 'i' };
-    if (mobile) filter.mobile = { $regex: mobile, $options: 'i' };
+    if (name) filter.name = { $regex: sanitizeSearch(name as string), $options: 'i' };
+    if (mobile) filter.mobile = { $regex: sanitizeSearch(mobile as string), $options: 'i' };
     if (status) filter.status = status;
 
     const [items, total] = await Promise.all([
